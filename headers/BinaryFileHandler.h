@@ -2,6 +2,7 @@
 #define BINARYFILEHANDLER_H
 
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include "DataBaseManager.h"
 #include <unordered_map>
@@ -12,12 +13,13 @@
 class BinaryFileAHandler {
 
     public:
-    static int createFiles_A (std::vector<std::u32string> onlyPares);
+    static int createFiles_A (const std::vector<std::u32string>& onlyPares);
 
-    static int insertRecordsToFileA(
-        const std::u32string value, 
-        const std::string& recordsFile,
-        const std::string& metadataFile
+    static void insertRecordsToFileA(
+        const std::u32string& value,
+        std::ofstream& recordsFile,
+        std::ofstream& metadataFile,
+        uint64_t& offset
     );
 
     static void readTwoBinaryFiles_A ();
@@ -51,13 +53,21 @@ class BinaryFileCHandler{
 
 };
 
+// Almacen D: reglas de fusion en orden de aprendizaje.
+class BinaryFileDHandler{
+
+    public:
+    static void createFiles_D(const std::vector<DataBaseManager::mergeRule>& reglas);
+
+    static std::vector<DataBaseManager::mergeRule> loadMergeRules();
+
+    static void readTwoBinaryFiles_D();
+
+};
+
 class SpecialTokens{
 
     public:
-
-    static std::string getPromptUtf8(const int& posicion, const std::string& path);
-
-    static int how_many_prompts(const std::string& path);
 
     static void insertInFileC(
         std::u32string value

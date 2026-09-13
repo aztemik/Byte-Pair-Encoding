@@ -5,6 +5,7 @@
 #include <iostream>
 #include <vector>
 #include <fstream>
+#include <stdexcept>
 
 #include "../headers/DataBaseManager.h"
 #include "../headers/GeneralBinaryFileHandler.h"
@@ -14,69 +15,55 @@
 
 using namespace std;
 
-int BinaryFileAHandler::insertRecordsToFileA(
-    const u32string value, 
-    const string& recordsFile,
-    const string& metadataFile
+// Escribe un registro en los flujos ya abiertos y avanza el desplazamiento.
+// Antes esta funcion abria el archivo cuatro veces por cada par (una para el
+// tipo, otra para consultar la posicion al sistema de archivos, otra para el
+// valor y otra para los metadatos). Con millones de pares eso son millones de
+// aperturas; ahora los flujos se abren una sola vez en createFiles_A y la
+// posicion se lleva en una variable.
+void BinaryFileAHandler::insertRecordsToFileA(
+    const u32string& value,
+    ofstream& recordsFile,
+    ofstream& metadataFile,
+    uint64_t& offset
     ){
 
-    uint64_t len = GeneralBinaryFileHandler::calculateBytesOfCharacters(value.c_str());
-    DataBaseManager::ValueType type = DataBaseManager::ValueType::STRING_UTF32;
+    const uint64_t len = value.size() * sizeof(char32_t);
+    const DataBaseManager::ValueType type = DataBaseManager::ValueType::STRING_UTF32;
 
-    // Create/Insert only value
-    try{
-        ofstream dataFile(recordsFile, ios::binary | ios::app);
-        dataFile.write(reinterpret_cast<const char*>(&type), sizeof(DataBaseManager::ValueType));
-        dataFile.close();
-    } catch (const exception& e){
-        cout<<"Error: "<<e.what()<<endl;
-    }
+    // Escribir type (1 byte). El value empieza justo despues.
+    recordsFile.write(reinterpret_cast<const char*>(&type), sizeof(uint8_t));
+    const uint64_t pos = offset + 1;
 
-    uint64_t pos = GeneralBinaryFileHandler::getNextPosition(recordsFile);
+    // Escribir value (UTF-32)
+    recordsFile.write(reinterpret_cast<const char*>(value.data()), len);
 
-    try{
-        ofstream dataFile(recordsFile, ios::binary | ios::app);
-        dataFile.write(reinterpret_cast<const char*>(value.data()), len); // sin enteder
-        dataFile.close();
-    } catch (const exception& e){
-        cout<<"Error: "<<e.what()<<endl;
-    }
+    // Escribir metadatos: longitud y desplazamiento del value
+    const DataBaseManager::struct_metadataFileA record = { len, pos };
+    metadataFile.write(reinterpret_cast<const char*>(&record), sizeof(DataBaseManager::struct_metadataFileA));
 
-    // Create/Insert Only Metadata
-    try{
-        DataBaseManager::struct_metadataFileA record = { len, pos};
-
-        ofstream metadata(metadataFile, ios::binary | ios::app);
-        metadata.write(reinterpret_cast<const char*>(&record), sizeof(DataBaseManager::struct_metadataFileA));
-        metadata.close();
-    } catch (const exception& e){
-        cout<<"Error: "<<e.what()<<endl;
-    }
-
-    return 0;
+    offset = pos + len;
 }
 
-int BinaryFileAHandler::createFiles_A (vector<u32string> onlyPares){
+int BinaryFileAHandler::createFiles_A (const vector<u32string>& onlyPares){
 
-    for (int i=0; i<onlyPares.size(); i++){
-        // insertar y/o crear binario metadataFileA and recordsFileA
-        try{
-            BinaryFileAHandler::insertRecordsToFileA(
-                onlyPares[i],
-                pathRecordsFileA, 
-                pathMetadataFileA
-            );
-        }catch (const exception& e){
-            cout<<"Error: "<<e.what()<<endl;
-        }
-        
+    // ios::trunc, no ios::app: el almacen A se reconstruye entero en cada
+    // entrenamiento. Con append, entrenar dos veces acumulaba los pares de la
+    // ejecucion anterior y falseaba todas las frecuencias.
+    ofstream recordsFileA(pathRecordsFileA, ios::binary | ios::trunc);
+    ofstream metadataFileA(pathMetadataFileA, ios::binary | ios::trunc);
+
+    if (!recordsFileA || !metadataFileA){
+        throw runtime_error("Error al abrir los archivos del almacen A");
     }
 
-    //debug 
-    // cout<<"DEBUG 2"<<endl;
-    // for (int i=0; i<onlyPares.size(); i++){
-    //     cout<<utf32ToUtf8(onlyPares[i])<<endl;
-    // }
+    uint64_t offset = 0;
+    for (const auto& par : onlyPares){
+        insertRecordsToFileA(par, recordsFileA, metadataFileA, offset);
+    }
+
+    recordsFileA.close();
+    metadataFileA.close();
 
     return 0;
 };
@@ -107,9 +94,12 @@ void BinaryFileAHandler::readTwoBinaryFiles_A(){
         vector<char32_t> value(metadata.len / sizeof(char32_t));
         recordsFileA.read(reinterpret_cast<char*>(value.data()), metadata.len);
 
+        // Sin terminador nulo: construir el u32string desde iteradores.
+        u32string valor(value.begin(), value.end());
+
         // Mostrar datos
         cout << "Type: " << static_cast<int>(type)<<" - Value: ";
-        cout<<utf32ToUtf8(value.data());
+        cout<<tokenParaMostrar(valor);
         cout<< " - len: "<<metadata.len
             << " - Pos: " << metadata.pos<<endl;
     }

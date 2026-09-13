@@ -11,77 +11,18 @@
 #include "../libraries/library_nlohmann/include/nlohmann/json.hpp"
 #include "../headers/converts.h"
 #include "../headers/BinaryFileHandler.h"
+#include "../headers/tokenizer.h"
+#include <vector>
 
 using json = nlohmann::json;
 using namespace std;
 
 
-string SpecialTokens::getPromptUtf8(const int& posicion, const string& path){
-    // Cargar el archivo JSON
-    ifstream inputFile(path);
-    if (!inputFile.is_open()) {
-        cerr << "Error al abrir el archivo." << endl;
-        return "";
-    }
-
-    // Parsear el contenido del archivo
-    json j;
-    inputFile >> j;
-
-    // Asegurarse de que el JSON sea un array
-    if (!j.is_array()) {
-        cerr << "El JSON no es un array." << endl;
-        return "";
-    }
-
-    // Verificar que la posición esté dentro del rango del array
-    if (posicion < 0 || posicion >= j.size()) {
-        cerr << "Posición fuera del rango del array JSON." << endl;
-        return "";
-    }
-
-    // Acceder al elemento en la posición dada y retornar el campo "prompt" si existe
-    if (j[posicion].contains("special_token") && j[posicion]["special_token"].is_string()) {
-        return j[posicion]["special_token"];
-    } else {
-        cerr << "El campo 'prompt' no se encuentra en la posición especificada o no es una cadena de texto." << endl;
-        return "";
-    }
-};
-
-
-int SpecialTokens::how_many_prompts(const string& path){
-    ifstream archivo(path);// leer archivo json
-
-    if (!archivo.is_open()){
-        cerr<<"No se puede abrir el archivo json";
-    }
-
-    //leer el archivo json
-
-    json prompts;
-    archivo >> prompts; // Carga el contenido del archivo en el objeto JSON
-    archivo.close();
-
-    int contador_prompts =0;
-
-    for (const auto& objeto: prompts){
-        if (objeto.contains("special_token") && objeto["special_token"].is_string()){
-            if(!objeto["special_token"].get<string>().empty()){
-                contador_prompts ++;
-            }
-        }
-    }
-
-
-    return contador_prompts;
-};
-
 void SpecialTokens::insertInFileC(
     u32string value
 ) {
 
-    uint64_t len = GeneralBinaryFileHandler::calculateBytesOfCharacters(value.c_str());
+    uint64_t len = GeneralBinaryFileHandler::calculateBytesOfCharacters(value);
 
     // crear los archivos C
     ofstream recordsFileC(pathRecordsFileC, ios::binary | ios::app);
@@ -126,18 +67,18 @@ void SpecialTokens::insertInFileC(
 
 int SpecialTokens::insertSpecialTokensInFileC(){
 
-    int amountPrompt = how_many_prompts(specialTokens);
+    // Misma carga que el corpus, solo cambia el campo del JSON. Antes esta
+    // clase tenia su propia copia de getPromptUtf8 y de how_many_prompts,
+    // identicas a las de tokenizerHandler salvo por esa cadena.
+    const vector<string> tokens = tokenizerHandler::loadCorpus(specialTokens, "special_token");
 
-    for (int i=0; i<amountPrompt; i++){
-        string promptInUtf8 = getPromptUtf8(i, specialTokens);
-        u32string promptInUtf32 = utf8_to_utf32(promptInUtf8);
+    for (const string& tokenUtf8 : tokens){
         try{
-            insertInFileC(promptInUtf32);
-
-        } catch (const exception e){
+            insertInFileC(utf8_to_utf32(tokenUtf8));
+        } catch (const exception& e){
             cout<<"Error: "<<e.what()<<endl;
         }
     }
-        
+
     return 0;
 }

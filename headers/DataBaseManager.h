@@ -60,6 +60,23 @@ namespace DataBaseManager{
         uint64_t pos;
     };
 
+    // Metadatos del almacen D (reglas de fusion).
+    // Se guardan las dos longitudes por separado en vez de un separador entre
+    // par1 y par2: un separador podria aparecer dentro de un token fusionado,
+    // las longitudes no tienen ese problema.
+    struct struct_metadataFileD{
+        uint64_t len1;   // bytes de par1
+        uint64_t len2;   // bytes de par2
+        uint64_t pos;    // desplazamiento del inicio de par1
+    };
+
+    // Una regla de fusion: el par que se fusiona y el token que produce.
+    struct mergeRule{
+        std::u32string par1;
+        std::u32string par2;
+        std::u32string resultado() const { return par1 + par2; }
+    };
+
     struct struct_recordFileC{
         uint8_t type;
         uint64_t value;
@@ -76,15 +93,7 @@ namespace DataBaseManager{
         std::u32string par1;
         std::u32string par2;
         int frecuencia;
-        std::vector<std::u32string> generateTokens(const std::u32string& prompt) {
-            std::vector<std::u32string> tokens;
-            for (size_t i = 0; i < prompt.size(); i++) {
-                tokens.push_back(std::u32string(1, prompt[i]));
-            }
-            return tokens;
-        };
-    
-    
+
         // constructor 
         parYFrecuencia(std::u32string p1, std::u32string p2, int freq): par1(p1), par2(p2), frecuencia(freq) {}
     };

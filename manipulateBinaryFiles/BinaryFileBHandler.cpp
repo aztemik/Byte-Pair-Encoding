@@ -81,7 +81,7 @@ vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>> Bin
             auto& entry = mapSorted[key];
             entry.operation = operation;    // Actualiza la operación
             entry.amount++;                 // Incrementa el contador
-        } catch (const exception e) {
+        } catch (const exception& e) {
             cout<<"Error: "<<e.what()<<endl;
         }
     
@@ -190,9 +190,12 @@ void BinaryFileBHandler::readTwoBinaryFiles_B() {
         uint64_t amount;
         recordsFileB.read(reinterpret_cast<char*>(&amount), sizeof(uint64_t));
 
+        // Sin terminador nulo: construir el u32string desde iteradores.
+        u32string valor(value.begin(), value.end());
+
         // Mostrar datos
         cout << "Type: " << static_cast<int>(type)<<" - ";
-        cout<<utf32ToUtf8(value.data());
+        cout<<tokenParaMostrar(valor);
         cout<< " - len: "<<metadata.len
             << " - Pos: " << metadata.pos
             << " - amount: "<<amount<<endl;

@@ -81,9 +81,11 @@ void BinaryFileCHandler::readTwoBinaryFles_C() {
         vector<char32_t> value(metadata.len / sizeof(char32_t));
         recordsFileC.read(reinterpret_cast<char*>(value.data()), metadata.len);
 
-        // Debug
+        // Sin terminador nulo: construir el u32string desde iteradores.
+        u32string valor(value.begin(), value.end());
+
         cout<< "Type: " << static_cast<int>(type)<<" - ";
-        cout<<utf32ToUtf8(value.data());
+        cout<<tokenParaMostrar(valor);
         cout<< " - len: "<<metadata.len 
             << " - amount: "<<metadata.amount
             << " - pos: "<<metadata.pos<<endl;

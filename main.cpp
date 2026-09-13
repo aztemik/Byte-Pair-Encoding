@@ -1,6 +1,9 @@
 
 #include <exception>
 #include <iostream>
+#include <algorithm>
+#include <map>
+#include <set>
 #include <string>
 #include <sys/resource.h>
 #include <sys/types.h>
@@ -26,64 +29,133 @@ void createAndBackup_Files_A(
         cout<<"BACKUP FILES A - EXITOSAMENTE"<<endl;
         BinaryFileAHandler::createFiles_A(onlyPairs);
         cout<<"CREATE FILES A - EXITOSAMENTE"<<"\n"<<endl;
-    } catch (const exception e){
+    } catch (const exception& e){
         cerr<<"Error: "<<e.what()<<endl;
     }
 
 };
 
-void createAndBackup(
-    vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>> allDataFilesA
+void createAndBackup_Files_B(
+    const vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>>& allDataFilesA
 ){
-
     try{
-        // CREATE FILES B
         BuildBackups::hacerCopiaSeguridad(pathRecordsFileB, frequency_valhalla);
         BuildBackups::hacerCopiaSeguridad(pathMetadataFileB, frequency_valhalla_metadata);
         cout<<"BACKUP FILES B - EXITOSAMENTE"<<endl;
         BinaryFileBHandler::createFiles_B(allDataFilesA);
         cout<<"CREATE FILES B - EXITOSAMENTE"<<"\n"<<endl;
-        // CREATE FILES C
+    } catch (const exception& e){
+        cerr<<"Error: "<<e.what()<<endl;
+    }
+}
+
+void createAndBackup_Files_C(
+    const vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>>& vocabularioFinal
+){
+    try{
         BuildBackups::hacerCopiaSeguridad(pathRecordsFileC, vocabulary);
         BuildBackups::hacerCopiaSeguridad(pathMetadataFileC, vocabulary_metadata);
         cout<<"BACKUP FILES C - EXITOSAMENTE"<<endl;
-        BinaryFileCHandler::createFiles_C(allDataFilesA);
+        BinaryFileCHandler::createFiles_C(vocabularioFinal);
         cout<<"CREATE FILES C - EXITOSAMENTE"<<"\n"<<endl;
-    } catch (const exception e){
+    } catch (const exception& e){
         cerr<<"Error: "<<e.what()<<endl;
     }
-
 }
 
-vector<u32string> getPairs (const string& path){
+void createAndBackup_Files_D(const vector<DataBaseManager::mergeRule>& reglas){
+    try{
+        BuildBackups::hacerCopiaSeguridad(pathRecordsFileD, merges);
+        BuildBackups::hacerCopiaSeguridad(pathMetadataFileD, merges_metadata);
+        cout<<"BACKUP FILES D - EXITOSAMENTE"<<endl;
+        BinaryFileDHandler::createFiles_D(reglas);
+        cout<<"CREATE FILES D - EXITOSAMENTE"<<"\n"<<endl;
+    } catch (const exception& e){
+        cerr<<"Error: "<<e.what()<<endl;
+    }
+}
 
-    int amountPrompts = tokenizerHandler::how_many_prompts(path);
-    cout<<"\nPATH TO PROMTS: "<< path<<""<<endl;
-    cout<<"AMOUNT OF PROMPTS: "<<amountPrompts<<endl<<"\n";
+// Carga el corpus y lo deja partido en simbolos de un caracter, listo para
+// el bucle de fusion. Una frase por elemento: los pares no cruzan de una a otra.
+vector<vector<u32string>> cargarSecuencias (const string& path){
 
-    vector<u32string> onlyPairs;
-    for (int i=0; i<amountPrompts; i++){
-                
-        string promptUTF8 = tokenizerHandler::getPromptUtf8(i, path);
+    const vector<string> frases = tokenizerHandler::loadCorpus(path);
 
-        u32string promptUTF32 = utf8_to_utf32(promptUTF8);
-        
-        vector<u32string> tokens = tokenizerHandler::generateTokens(promptUTF32);
+    cout<<"\nCORPUS: "<< path <<endl;
+    cout<<"FRASES: "<< frases.size() <<endl<<"\n";
 
-        // no sobreescribir los datos en el vector
-        vector<u32string> newPairs = tokenizerHandler::buildPairsWithReplacement(tokens);
-        onlyPairs.insert(onlyPairs.end(), newPairs.begin(), newPairs.end()); // Agregar al final
+    // Una secuencia por PALABRA, no por frase: las fusiones no deben cruzar
+    // fronteras de palabra.
+    vector<vector<u32string>> secuencias;
+    for (const string& frase : frases){
+        vector<vector<u32string>> palabras =
+            tokenizerHandler::pretokenizarEnPalabras(utf8_to_utf32(frase));
+        secuencias.insert(secuencias.end(), palabras.begin(), palabras.end());
+    }
+    cout<<"PALABRAS: "<< secuencias.size() <<endl<<"\n";
+    return secuencias;
+}
 
-        // --DEBUG
-        // cout<<"DEBUG 1"<<endl;
-        // cout<<"Numero de iteracion: "<<i<<endl;
-        // cout<<"Prompt UTF-8: "<<promptUTF8<<endl;
-        // param_u32string_see(promptUTF32);
+// Todos los pares contiguos del corpus inicial, con repeticiones. Es lo que
+// alimenta el almacen A, igual que antes, solo que ahora se construye desde
+// las secuencias ya pretokenizadas en vez de releer el JSON por cada frase.
+vector<u32string> paresIniciales (const vector<vector<u32string>>& secuencias){
+    vector<u32string> pares;
+    for (const auto& secuencia : secuencias){
+        if (secuencia.size() < 2) continue;
+        for (size_t i = 0; i + 1 < secuencia.size(); ++i){
+            pares.push_back(secuencia[i] + secuencia[i+1]);
+        }
+    }
+    return pares;
+}
 
+// Construye el vocabulario final en el formato que espera createFiles_C.
+//
+// El orden determina el ID de cada token, asi que se fija de forma explicita:
+// primero los caracteres sueltos del corpus (hacen falta siempre, aunque el
+// entrenamiento los haya fusionado casi todos, para poder tokenizar texto
+// nuevo), y despues los tokens fusionados en el mismo orden en que se
+// aprendieron.
+vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>> construirVocabulario(
+    const vector<vector<u32string>>& secuenciasIniciales,
+    const vector<vector<u32string>>& secuenciasFinales,
+    const vector<DataBaseManager::mergeRule>& reglas
+){
+    const uint8_t type = static_cast<uint8_t>(DataBaseManager::ValueType::STRING_UTF32);
+
+    // Frecuencia de cada simbolo en el corpus ya fusionado.
+    map<u32string, uint64_t> frecuenciaFinal;
+    for (const auto& secuencia : secuenciasFinales)
+        for (const auto& simbolo : secuencia) frecuenciaFinal[simbolo]++;
+
+    // Caracteres base, por frecuencia descendente en el corpus original.
+    map<u32string, uint64_t> frecuenciaBase;
+    for (const auto& secuencia : secuenciasIniciales)
+        for (const auto& simbolo : secuencia) frecuenciaBase[simbolo]++;
+
+    vector<pair<u32string, uint64_t>> base(frecuenciaBase.begin(), frecuenciaBase.end());
+    sort(base.begin(), base.end(),
+         [](const auto& a, const auto& b){ return a.second > b.second; });
+
+    vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>> vocabulario;
+    set<u32string> yaInsertado;
+
+    auto anadir = [&](const u32string& valor, uint64_t amount){
+        if (valor.empty() || yaInsertado.count(valor)) return;
+        yaInsertado.insert(valor);
+        DataBaseManager::operationsFileB operacion{ type, valor, valor.size() * sizeof(char32_t) };
+        vocabulario.push_back({ {type, valor}, { operacion, amount } });
+    };
+
+    for (const auto& [simbolo, freq] : base) anadir(simbolo, freq);
+    for (const auto& regla : reglas){
+        const u32string token = regla.resultado();
+        anadir(token, frecuenciaFinal.count(token) ? frecuenciaFinal.at(token) : 0);
     }
 
-    return onlyPairs;
-};
+    return vocabulario;
+}
 
 void repeatProccess (){
     int seguimiento;
@@ -133,7 +205,8 @@ int main (){
         <<"3. List Binary/Metadata B\n"
         <<"4. List Binary/Metadata A\n"
         <<"5. Tokenizar text\n"
-        <<"6. Insert especial tokens"<<endl;
+        <<"6. Insert especial tokens\n"
+        <<"7. List merge rules"<<endl;
     cin>>opcion; 
 
     if (opcion == 1){
@@ -147,24 +220,53 @@ int main (){
         
         switch (pathToTraining) {
             case 1: {
-                cout<<"\n === EMPEZANDO OPERACIONES SCHEDULE=== "<<"\n";
-                vector<u32string> onlyPairs = getPairs(training_schedule);
+                cout<<"\n === ENTRENAMIENTO BYTE-PAIR ENCODING === "<<"\n";
 
-                createAndBackup_Files_A(onlyPairs);
-
-                vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>> allDataFilesA;
-
-                try {
-                    allDataFilesA =  BinaryFileBHandler::loadTwoFiles_A();
-                    cout<<"TWO FILES A LOADED INTO RAM\n"<<endl;
-                } catch (const exception e) {
-                    cerr<<"Error: "<<e.what()<<endl;
+                int numeroDeFusiones = 300;
+                cout<<"Numero de fusiones a aprender (Enter = 300): ";
+                string linea;
+                getline(cin >> ws, linea);
+                if (!linea.empty()){
+                    try { numeroDeFusiones = stoi(linea); } catch (const exception&) {}
                 }
 
-                createAndBackup(allDataFilesA);
+                // 1. Corpus partido en caracteres (el JSON se parsea una sola vez)
+                vector<vector<u32string>> secuencias = cargarSecuencias(training_schedule);
+                if (secuencias.empty()){
+                    cerr<<"Corpus vacio o ilegible. Se cancela el entrenamiento."<<endl;
+                    break;
+                }
+                const vector<vector<u32string>> secuenciasIniciales = secuencias;
+
+                // 2. Almacenes A y B: pares en crudo y conteo ordenado.
+                //    Se escriben una sola vez, con el estado inicial del corpus.
+                createAndBackup_Files_A(paresIniciales(secuencias));
+
+                vector<pair<DataBaseManager::KeyType, DataBaseManager::countOperationFileB>> allDataFilesA;
+                try {
+                    allDataFilesA = BinaryFileBHandler::loadTwoFiles_A();
+                    cout<<"TWO FILES A LOADED INTO RAM\n"<<endl;
+                } catch (const exception& e) {
+                    cerr<<"Error: "<<e.what()<<endl;
+                }
+                createAndBackup_Files_B(allDataFilesA);
+
+                // 3. El bucle de fusion: aqui es donde esto pasa de ser una
+                //    tabla de bigramas a ser byte-pair encoding.
+                cout<<"\n--- BUCLE DE FUSION ---"<<endl;
+                vector<DataBaseManager::mergeRule> reglas =
+                    tokenizerHandler::trainBPE(secuencias, numeroDeFusiones, 2);
+                cout<<"REGLAS APRENDIDAS: "<<reglas.size()<<"\n"<<endl;
+
+                // 4. Almacenes C y D: vocabulario final y reglas de fusion.
+                auto vocabularioFinal = construirVocabulario(secuenciasIniciales, secuencias, reglas);
+                createAndBackup_Files_C(vocabularioFinal);
+                createAndBackup_Files_D(reglas);
+
+                cout<<"TAMANO DEL VOCABULARIO: "<<vocabularioFinal.size()<<endl;
                 break;
             }
-            
+
             case 2: {
                 
                 break;
@@ -185,12 +287,24 @@ int main (){
     } else if (opcion == 4){
         BinaryFileAHandler::readTwoBinaryFiles_A();
     } else if (opcion == 5){
-        string texto = "Transporte público cercano que me lleve a la estación de tren Buenavista";
+        string texto;
+        cout<<"Texto a tokenizar (Enter = frase de ejemplo): ";
+        getline(cin >> ws, texto);
+        if (texto.empty()){
+            texto = "Transporte público cercano que me lleve a la estación de tren Buenavista";
+            cout<<"Usando: "<<texto<<endl;
+        }
+        cout<<endl;
 
-        vector<uint64_t> texto_tokenizado = tokenizerHandler::tokenizer(texto);
-
+        try {
+            tokenizerHandler::tokenizer(texto);
+        } catch (const exception& e){
+            cerr<<"Error: "<<e.what()<<endl;
+        }
     } else if(opcion == 6){
         SpecialTokens::insertSpecialTokensInFileC();
+    } else if(opcion == 7){
+        BinaryFileDHandler::readTwoBinaryFiles_D();
     }
 
     return 0;

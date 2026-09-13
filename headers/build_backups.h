@@ -42,7 +42,7 @@ class BuildBackups{
         if (!origen || !backup) return false;
         try{
             backup << origen.rdbuf();
-        } catch (const std::exception e){
+        } catch (const std::exception& e){
             std::cout<<"Error: "<<e.what()<<std::endl;
         } 
         
