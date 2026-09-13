@@ -1,0 +1,6 @@
+[
+  { "special_token": "<UNK>" },
+  { "special_token": "<PAD>" },
+  { "special_token": "<BOS>" },
+  { "special_token": "<EOS>" }
+]

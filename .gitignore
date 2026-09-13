@@ -1,7 +1,13 @@
-/tokenizer/tokenizer.o
-/manipulateBinaryFiles/BinaryFileAHandler.o
-/manipulateBinaryFiles/BinaryFileBHandler.o
-/manipulateBinaryFiles/BinaryFileCHandler.o
-/manipulateBinaryFiles/GeneralBinaryFileHandler.o
-/manipulateBinaryFiles/specialTokens.o
-/main.o
+# Ejecutable y objetos
+main
+*.o
+*.d
+
+# Almacenes binarios generados por el entrenamiento
+data/out/*.bin
+
+# Copias de seguridad con marca de tiempo
+backups/*.bin
+
+# Revision interna, no forma parte del proyecto
+/revision-tokenizador.md
